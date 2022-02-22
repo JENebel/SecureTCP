@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.1.32210.238
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SecureTCP", "SecureTCP\SecureTCP.csproj", "{E06B3204-3D2D-492C-86DA-6E61CA0B5227}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SecureTCPTest", "SecureTCPTest\SecureTCPTest.csproj", "{50811A4E-DA73-485B-9E7E-1137B01C60E5}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{E06B3204-3D2D-492C-86DA-6E61CA0B5227}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E06B3204-3D2D-492C-86DA-6E61CA0B5227}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E06B3204-3D2D-492C-86DA-6E61CA0B5227}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E06B3204-3D2D-492C-86DA-6E61CA0B5227}.Release|Any CPU.Build.0 = Release|Any CPU
+		{50811A4E-DA73-485B-9E7E-1137B01C60E5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{50811A4E-DA73-485B-9E7E-1137B01C60E5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{50811A4E-DA73-485B-9E7E-1137B01C60E5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{50811A4E-DA73-485B-9E7E-1137B01C60E5}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {6D1B3EE1-0C1A-4EEA-8DB0-65C1643AE221}
+	EndGlobalSection
+EndGlobal
