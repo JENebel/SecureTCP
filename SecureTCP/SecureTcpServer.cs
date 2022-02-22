@@ -13,7 +13,7 @@ namespace SecureTCP
     public class SecureTcpServer
     {
         private TcpListener server;
-        private List<Connection> connections;
+        private Dictionary<string, (Connection c, object keys)> connections;
         private RSA certificate;
         private Aes aes;
         private bool requireCertificate = false;
@@ -22,6 +22,7 @@ namespace SecureTCP
 
         public bool running { get; private set; } = false;
         public string IpPort { get { return ip + ":" + port; } }
+        public EncryptionSettings EncryptionSettings { get; private set; } = new EncryptionSettings();
 
         public event EventHandler<ClientConnectedEventArgs> ClientConnected;
         public event EventHandler<ClientDisconnectedEventArgs> ClientDisconnected;
@@ -54,59 +55,53 @@ namespace SecureTCP
                 try
                 {
                     Socket socket = await server.AcceptSocketAsync();
-                    Connection connection = new Connection(socket);
+                    Connection connection = new Connection(socket, EncryptionSettings);
                     EstablishConnection(connection);
                 }
                 catch (Exception) { }
             }
         }
 
-        private async void EstablishConnection(Connection connection)
+        private void EstablishConnection(Connection connection)
         {
-            Console.WriteLine(connection.RemoteIpPort);
-            RSA rsa = RSA.Create(4096);
+            short aesKeySize = EncryptionSettings.AesKeySize;
+            short rsaKeySize = EncryptionSettings.RsaKeySize;
 
-            //Receive validateRequest
-            byte[] req = await connection.Receive(1);
-            if (requireCertificate)
+            RSA signer = RSA.Create(rsaKeySize);
+            string publicXML = signer.ToXmlString(false);
+            byte[] xmlBytes = Encoding.ASCII.GetBytes(publicXML);
+
+            short certSigLength = certificate == null ? (short)0 : (short)(64 + certificate.KeySize / 8);
+
+            byte[] unsignedMsg1 = new byte[6 + xmlBytes.Length + certSigLength];
+
+            byte[] rsaSizeBytes = BitConverter.GetBytes(rsaKeySize);
+            byte[] aesSizeBytes = BitConverter.GetBytes(aesKeySize);
+            byte[] xmlByteLength = BitConverter.GetBytes((short)xmlBytes.Length);
+            Array.Copy(rsaSizeBytes, 0, unsignedMsg1, 0, 2);
+            Array.Copy(aesSizeBytes, 0, unsignedMsg1, 2, 2);
+            Array.Copy(xmlBytes, 0, unsignedMsg1, 4, xmlBytes.Length);
+
+            //Sign with certificate
+            if (certificate != null)
             {
-                if (req[0] == 0)
-                {
-                    //Not requesting, just sending public key
-                    byte[] certificatePublic = Encoding.ASCII.GetBytes(certificate.ToXmlString(false));
-                    connection.Send(certificatePublic, false);
-                }
-                else
-                {
-                    //Requesting, signing request
-                    byte[] inputBytes = await connection.Receive(certificate.KeySize);
-                    byte[] signature = certificate.SignData(inputBytes, HashAlgorithmName.SHA512, RSASignaturePadding.Pkcs1);
-                    connection.Send(signature, false);
-                }
+                byte[] messageHash = SHA512.Create().ComputeHash(unsignedMsg1);
+                byte[] signature = certificate.SignHash(messageHash, HashAlgorithmName.SHA512, RSASignaturePadding.Pkcs1);
+
+                Array.Copy(messageHash, 0, unsignedMsg1, unsignedMsg1.Length - messageHash.Length - signature.Length, 64);
+                Array.Copy(signature, 0, unsignedMsg1, unsignedMsg1.Length - signature.Length, signature.Length);
             }
+            else
+                unsignedMsg1[0] = 0;
 
-            //Receive RSA
-            byte[] rawSignature = await connection.Receive(755);
-            verifier = new RSACryptoServiceProvider();
-            verifier.FromXmlString(Encoding.ASCII.GetString(rawSignature));
-            //Send RSA
-            byte[] rsaXml = Encoding.ASCII.GetBytes(rsa.ToXmlString(false));
-            connection.Send(rsaXml, false);
+            connection.Send(unsignedMsg1, false);
 
-            //Receive encrypted AES key
-            byte[] rawAesKey = await connection.Receive(544);
-            byte[] aesKey = Security.VerifiedData(verifier, rawAesKey);
-            aes = Aes.Create();
-            aes.Key = aesKey;
 
-            //Send OK
-            connection.Send(new byte[1], false);
 
+            //
             connection.DataReceived += (s, e) => { MessageReceived(this, new MessageReceivedEventArgs(s as Connection, e.Data)); };
-            ClientConnected(this, new ClientConnectedEventArgs(connection));
-            connection.BeginReceive();
-
-            
+            //ClientConnected(this, new ClientConnectedEventArgs(connection));
+            connection.BeginReceiving();
         }
 
         public void Send(byte[] data, Connection connection)
@@ -125,10 +120,10 @@ namespace SecureTCP
 
         public void BroadCast(byte[] data)
         {
-            foreach (Connection connection in connections.Keys)
+            /*foreach (Connection connection in connections.Keys)
             {
                 Send(data, connection);
-            }
+            }*/
         }
 
         public void Stop()
@@ -140,10 +135,10 @@ namespace SecureTCP
 
         public void DisconnectAll()
         {
-            foreach (Connection connection in connections.Keys)
+            /*foreach (Connection connection in connections.Keys)
             {
                 connection.ShutDown();
-            }
+            }*/
         }
     }
 }

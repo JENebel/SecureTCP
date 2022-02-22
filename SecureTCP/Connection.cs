@@ -16,13 +16,13 @@ namespace SecureTCP
         public string LocalIpPort { get; private set; }
         public bool Receiving = false;
 
-        RSA signer;
-        RSA verifier;
-        Aes encrypter;
+        private Crypto crypto;
 
         internal event EventHandler<DataReceivedEventArgs> DataReceived;
 
-        public Connection(Socket socket)
+        private EncryptionSettings encryptionSettings;
+
+        public Connection(Socket socket, EncryptionSettings encryptionSettings = null)
         {
             this.socket = socket;
             IPEndPoint remoteIpEndPoint = socket.RemoteEndPoint as IPEndPoint;
@@ -30,47 +30,54 @@ namespace SecureTCP
 
             IPEndPoint localIpEndPoint = socket.LocalEndPoint as IPEndPoint;
             RemoteIpPort = localIpEndPoint.Address.ToString() + ":" + localIpEndPoint.Port;
+
+            this.encryptionSettings = encryptionSettings;
         }
 
-        public async Task<byte[]> ReceiveOnce()
+        public byte[] ReceiveOnceAsync(bool decrypt = true)
         {
-
+            return ReceiveMessage(decrypt).Result;
         }
 
-        public async Task<byte[]> Receive(int byteCount)
-        {
-            
-            return bytes;
-        }
-
-        public async void BeginReceive()
+        public void BeginReceiving()
         {
             if (Receiving) return;
 
             while (socket.Connected)
             {
-                DataReceived(this, new DataReceivedEventArgs(ReceiveMessage().Result));
+                try
+                {
+                    byte[] message = ReceiveMessage().Result;
+
+                    DataReceived(this, new DataReceivedEventArgs(ReceiveMessage().Result));
+                }
+                catch (Exception) { throw; }
             }
         }
 
-        public async Task<byte[]> ReceiveMessage()
+        private async Task<byte[]> ReceiveMessage(bool decrypt = true)
         {
             byte[] lengthBuffer = new byte[4];
             await socket.ReceiveAsync(lengthBuffer, SocketFlags.None);
 
-            int length = BitConverter.ToInt32(lengthBuffer, 0);
+            int length = BitConverter.ToInt32(lengthBuffer);
             byte[] buffer = new byte[length];
             await socket.ReceiveAsync(buffer, SocketFlags.None);
 
             return buffer;
         }
 
-        public async void Send(byte[] data, bool wrap = true)
+        public async void Send(byte[] message, bool encrypt = true)
         {
             try
             {
-                byte[] message = wrap ? NetworkMessage.Wrap(data) : data;
-                await socket.SendAsync(message, SocketFlags.None);
+                byte[] lengthBytes = BitConverter.GetBytes(message.Length);
+                byte[] wrapped = new byte[4 + message.Length];
+
+                Array.Copy(lengthBytes, 0, wrapped, 0, lengthBytes.Length);
+                Array.Copy(message, 0, wrapped, 4, message.Length);
+
+                await socket.SendAsync(wrapped, SocketFlags.None);
             }
             catch (Exception)
             {
