@@ -9,68 +9,143 @@ namespace SecureTCP
 {
     public class EncryptionSettings
     {
-        public enum AES { AES_128, AES_256 }
-        public enum RSA { RSA_1024, RSA_2048, RSA_4096, RSA_8192, RSA_16384 }
+        public enum AesType { AES_128, AES_256 }
+        public enum CurveType { BrainpoolP256, BrainpoolP384, BrainpoolP512, Nist256, Nist384, Nist521 }
 
-        private AES Aes { get; set; }
-        private RSA Rsa { get; set; }
+        private AesType Aes { get; set; }
+        private CurveType Curve { get; set; }
 
         public short AesKeySize
         {
             get
             {
-                short aes = 0;
                 switch (Aes)
                 {
-                    case AES.AES_128:
-                        aes = 128;
-                        break;
-                    case AES.AES_256:
-                        aes = 256;
-                        break;
+                    case AesType.AES_128:
+                        return 128;
+                    case AesType.AES_256:
+                        return 256;
                     default:
-                        break;
+                        throw new ArgumentException("Not legal AES keySize");
                 }
-                return aes;
             }
         }
-        public short RsaKeySize
+
+        public ECCurve ECCurve
         { 
             get
             {
-                short rsa = 0;
-                switch (Rsa)
+                switch (Curve)
                 {
-                    case RSA.RSA_1024:
-                        rsa = 1024;
-                        break;
-                    case RSA.RSA_2048:
-                        rsa = 2048;
-                        break;
-                    case RSA.RSA_4096:
-                        rsa = 4096;
-                        break;
-                    case RSA.RSA_8192:
-                        rsa = 8192;
-                        break;
-                    case RSA.RSA_16384:
-                        rsa = 16384;
-                        break;
+                    case CurveType.BrainpoolP256:
+                        return ECCurve.NamedCurves.brainpoolP256r1;
+                    case CurveType.BrainpoolP384:
+                        return ECCurve.NamedCurves.brainpoolP256r1;
+                    case CurveType.BrainpoolP512:
+                        return ECCurve.NamedCurves.brainpoolP256r1;
+                    case CurveType.Nist256:
+                        return ECCurve.NamedCurves.brainpoolP256r1;
+                    case CurveType.Nist384:
+                        return ECCurve.NamedCurves.brainpoolP256r1;
+                    case CurveType.Nist521:
+                        return ECCurve.NamedCurves.brainpoolP256r1;
+                    default:
+                        throw new ArgumentException("Curve does not exist");
                 }
-                return rsa;
             }
         }
 
         public EncryptionSettings()
         {
-            Aes = AES.AES_256;
-            Rsa = RSA.RSA_4096;
+            Aes = AesType.AES_256;
+            Curve = CurveType.BrainpoolP512;
         }
 
-        public EncryptionSettings(AES aes, RSA rsa)
+        public EncryptionSettings(AesType aes, CurveType curve)
         {
             Aes = aes;
-            Rsa = rsa;
+            Curve = curve;
+        }
+
+        public byte[] ToBytes()
+        {
+            byte[] ESBytes = new byte[2];
+            switch (Aes)
+            {
+                case AesType.AES_128:
+                    ESBytes[0] = 0;
+                    break;
+                case AesType.AES_256:
+                    ESBytes[0] = 1;
+                    break;
+                default:
+                    throw new Exception("AES mode not recognized");
+            }
+            switch (Curve)
+            {
+                case CurveType.BrainpoolP256:
+                    ESBytes[1] = 0;
+                    break;
+                case CurveType.BrainpoolP384:
+                    ESBytes[1] = 1;
+                    break;
+                case CurveType.BrainpoolP512:
+                    ESBytes[1] = 2;
+                    break;
+                case CurveType.Nist256:
+                    ESBytes[1] = 3;
+                    break;
+                case CurveType.Nist384:
+                    ESBytes[1] = 4;
+                    break;
+                case CurveType.Nist521:
+                    ESBytes[1] = 5;
+                    break;
+                default:
+                    throw new Exception("Curve mode not recognized");
+            }
+            return ESBytes;
+        }
+
+        public static EncryptionSettings FromBytes(byte[] ESBytes)
+        {
+            AesType aes;
+            CurveType curve;
+            switch (ESBytes[0])
+            {
+                case 0:
+                    aes = AesType.AES_128;
+                    break;
+                case 1:
+                    aes = AesType.AES_256;
+                    break;
+                default:
+                    throw new Exception("AES mode not recognized");
+            }
+            switch (ESBytes[1])
+            {
+                case 0:
+                    curve = CurveType.BrainpoolP256;
+                    break;
+                case 1:
+                    curve = CurveType.BrainpoolP384;
+                    break;
+                case 2:
+                    curve = CurveType.BrainpoolP512;
+                    break;
+                case 3:
+                    curve = CurveType.Nist256;
+                    break;
+                case 4:
+                    curve = CurveType.Nist384;
+                    break;
+                case 5:
+                    curve = CurveType.Nist521;
+                    break;
+                default:
+                    throw new Exception("Curve mode not recognized");
+            }
+            return new EncryptionSettings(aes, curve);
         }
     }
 }

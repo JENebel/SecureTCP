@@ -10,14 +10,16 @@ namespace SecureTCP
     public class Crypto
     {
         private Aes encrypter;
-        private RSACryptoServiceProvider signer;
-        private RSACryptoServiceProvider verifier;
+        private ECDsa signer;
+        private ECDsa verifier;
+        private int signatureLength;
 
-        public Crypto(Aes encrypter, RSACryptoServiceProvider signer, RSACryptoServiceProvider verifier)
+        public Crypto(Aes encrypter, ECDsa signer, ECDsa verifier)
         {
             this.encrypter = encrypter;
             this.signer = signer;
             this.verifier = verifier;
+            signatureLength = signer.GetMaxSignatureSize(DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
         }
 
         public byte[] Decrypt(byte[] data)
@@ -35,19 +37,19 @@ namespace SecureTCP
 
         public byte[] VerifiedData(byte[] data)
         {
-            byte[] signature = data.Take(verifier.KeySize / 8).ToArray();
-            byte[] message = data.Skip(verifier.KeySize / 8).ToArray();
-            if(!verifier.VerifyData(message, signature, HashAlgorithmName.SHA512, RSASignaturePadding.Pkcs1))
+            byte[] signature = data.Take(signatureLength).ToArray();
+            byte[] message = data.Skip(signatureLength).ToArray();
+            if(!verifier.VerifyData(message, signature, HashAlgorithmName.SHA512))
                 throw new BadSignatureException("Bad signature. Wasn't signed by the original key");
             return message;
         }
 
         public byte[] SignData(byte[] data)
         {
-            byte[] msgWithSignature = new byte[512 + data.Length];
-            byte[] signed = signer.SignData(data, HashAlgorithmName.SHA512, RSASignaturePadding.Pkcs1);
-            Array.Copy(signed, msgWithSignature, 512);
-            Array.Copy(data, 0, msgWithSignature, 512, data.Length);
+            byte[] msgWithSignature = new byte[signatureLength + data.Length];
+            byte[] signature = signer.SignHash(SHA512.HashData(data), DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+            Array.Copy(signature, msgWithSignature, signatureLength);
+            Array.Copy(data, 0, msgWithSignature, signatureLength, data.Length);
             return msgWithSignature;
         }
     }

@@ -9,6 +9,8 @@ using System.Net;
 
 namespace SecureTCP
 {
+    public enum MessageType { Normal, Handshake, Shutdown, HandshakeError }
+
     public class Connection
     {
         private Socket socket;
@@ -57,25 +59,31 @@ namespace SecureTCP
 
         private async Task<byte[]> ReceiveMessage(bool decrypt = true)
         {
-            byte[] lengthBuffer = new byte[4];
-            await socket.ReceiveAsync(lengthBuffer, SocketFlags.None);
+            byte[] metaBuffer = new byte[5];
+            MessageType type = ByteToMsgType(metaBuffer[4]);
+//Add code for Shutdown and HandshakeError
 
-            int length = BitConverter.ToInt32(lengthBuffer);
+            await socket.ReceiveAsync(metaBuffer, SocketFlags.None);
+
+            int length = BitConverter.ToInt32(metaBuffer);
             byte[] buffer = new byte[length];
+            byte[] vs = new byte[length + 2];
+            socket.ReceiveBufferSize = length;
             await socket.ReceiveAsync(buffer, SocketFlags.None);
 
-            return buffer;
+            return type == MessageType.Normal ? crypto.Decrypt(buffer) : buffer;
         }
 
-        public async void Send(byte[] message, bool encrypt = true)
+        public async void Send(byte[] message, MessageType type, bool encrypt = true)
         {
             try
             {
                 byte[] lengthBytes = BitConverter.GetBytes(message.Length);
-                byte[] wrapped = new byte[4 + message.Length];
+                byte[] wrapped = new byte[5 + message.Length];
+                message[4] = MsgTypeToByte(type);
 
-                Array.Copy(lengthBytes, 0, wrapped, 0, lengthBytes.Length);
-                Array.Copy(message, 0, wrapped, 4, message.Length);
+                Array.Copy(lengthBytes, 0, wrapped, 1, lengthBytes.Length);
+                Array.Copy(message, 0, wrapped, 5, message.Length);
 
                 await socket.SendAsync(wrapped, SocketFlags.None);
             }
@@ -88,6 +96,40 @@ namespace SecureTCP
         public void ShutDown()
         {
             socket.Shutdown(SocketShutdown.Send);
+        }
+
+        byte MsgTypeToByte(MessageType type)
+        {
+            switch (type)
+            {
+                case MessageType.Normal:
+                    return 0;
+                case MessageType.Handshake:
+                    return 1;
+                case MessageType.Shutdown:
+                    return 2;
+                case MessageType.HandshakeError:
+                    return 3;
+                default:
+                    throw new Exception("No byte value corresponding to " + type.ToString());
+            }
+        }
+
+        MessageType ByteToMsgType(byte msgByte)
+        {
+            switch (msgByte)
+            {
+                case 0:
+                    return MessageType.Normal;
+                case 1:
+                    return MessageType.Handshake;
+                case 2:
+                    return MessageType.Shutdown;
+                case 3:
+                    return MessageType.HandshakeError;
+                default:
+                    throw new Exception("No message type corresponding to " + msgByte);
+            }
         }
     }
 }

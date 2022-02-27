@@ -39,7 +39,16 @@ namespace SecureTCP
                 await socket.ConnectAsync(IPAddress.Parse(ip), port);
                 connection = new Connection(socket);
 
+                connection.Send(RandomNumberGenerator.GetBytes(32), MessageType.Handshake);
+
+                //Receive first message
                 byte[] initialMsg = connection.ReceiveOnceAsync(false);
+                short rsaLength = BitConverter.ToInt16(initialMsg, 0);
+                short aesLength = BitConverter.ToInt16(initialMsg, 2);
+                short xmlLength = BitConverter.ToInt16(initialMsg, 4);
+                byte[] xml = new byte[xmlLength];
+                Array.Copy(initialMsg, 6, xml, 0, xmlLength);
+                string serverXmlString = Encoding.ASCII.GetString(xml);
 
 
 
@@ -59,13 +68,13 @@ namespace SecureTCP
         {
             try
             {
-                connection.Send(data);
+                connection.Send(data, MessageType.Normal);
             }
             catch (Exception)
             {
                 connection.ShutDown();
                 ClientDisconnected(this, new ClientDisconnectedEventArgs(connection, DisconnectReason.Error));
-            }            
+            }
         }
     }
 }

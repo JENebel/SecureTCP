@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Net;
 using System.Net.Security;
 using System.Security.Cryptography;
+using System.Runtime.InteropServices;
 
 namespace SecureTCP
 {
@@ -14,7 +15,7 @@ namespace SecureTCP
     {
         private TcpListener server;
         private Dictionary<string, (Connection c, object keys)> connections;
-        private RSA certificate;
+        private ECDsa certificate;
         private Aes aes;
         private bool requireCertificate = false;
         private int port;
@@ -28,16 +29,49 @@ namespace SecureTCP
         public event EventHandler<ClientDisconnectedEventArgs> ClientDisconnected;
         public event EventHandler<MessageReceivedEventArgs> MessageReceived;
 
-        public SecureTcpServer(string ip, int port, string xmlString = "")
+        public SecureTcpServer(string ip, int port)
+        {
+            this.ip = ip;
+            this.port = port;
+        }
+
+        public SecureTcpServer(string ip, int port, byte[] rawCertificate, string password)
         {
             this.ip = ip;
             this.port = port;
 
-            if (xmlString != "")
-            {
-                certificate = new RSACryptoServiceProvider();
-                certificate.FromXmlString(xmlString);
-            }
+            //Load certificate
+            //PasswordDeriveBytes pdb = new PasswordDeriveBytes();
+            byte[] certificate;
+            ECParameters certParams = new ECParameters();
+            byte[] x = new byte[rawCertificate.Length / 2];
+            byte[] y = new byte[rawCertificate.Length / 2];
+            Array.Copy(rawCertificate, 0, x, 0, x.Length);
+            Array.Copy(rawCertificate, rawCertificate.Length / 2, y, 0, y.Length);
+            certParams.Curve = ECCurve.NamedCurves.brainpoolP512r1; // SHOULD BE ABLE TO CHANGE
+            certParams.Q.X = x;
+            certParams.Q.Y = y;
+
+            this.certificate = ECDsa.Create(certParams);
+
+        }
+
+        public byte[] ExportCertificate(string password)
+        {
+            byte[] salt = RandomNumberGenerator.GetBytes(8);
+
+            var param = certificate.ExportParameters(true);
+            byte[] QX = param.Q.X;
+            byte[] QY = param.Q.Y;
+            byte[] D = param.D;
+            byte[] serialized = new byte[QX.Length + QY.Length + D.Length];
+            Array.Copy(QX, serialized, D.Length);
+            Array.Copy(QY, 0, serialized, QX.Length, QY.Length);
+            Array.Copy(D, 0, serialized, QX.Length + QY.Length, D.Length);
+            
+            byte[] encrypted = new byte[16 + serialized.Length];
+            Array.Copy(salt, encrypted, salt.Length);
+            return serialized;
         }
 
         public void Start()
@@ -65,36 +99,43 @@ namespace SecureTCP
         private void EstablishConnection(Connection connection)
         {
             short aesKeySize = EncryptionSettings.AesKeySize;
-            short rsaKeySize = EncryptionSettings.RsaKeySize;
+            ECCurve curve = EncryptionSettings.ECCurve;
+            ECDiffieHellman serverECDH = ECDiffieHellman.Create(curve);
+            
+            ECParameters serverPubParams = serverECDH.ExportParameters(false);
+            byte[] paramX = serverPubParams.Q.X;
+            byte[] paramY = serverPubParams.Q.Y;
+            byte[] serverPubKey = new byte[paramX.Length + paramY.Length];
+            Array.Copy(paramX, 0, serverPubKey, 0, paramX.Length);
+            Array.Copy(paramY, 0, serverPubKey, paramX.Length, paramY.Length);
 
-            RSA signer = RSA.Create(rsaKeySize);
-            string publicXML = signer.ToXmlString(false);
-            byte[] xmlBytes = Encoding.ASCII.GetBytes(publicXML);
+            byte[] encryptionModeBytes = EncryptionSettings.ToBytes();
 
-            short certSigLength = certificate == null ? (short)0 : (short)(64 + certificate.KeySize / 8);
+            byte[] unsignedMsg = new byte[6 + serverPubKey.Length + 1];
 
-            byte[] unsignedMsg1 = new byte[6 + xmlBytes.Length + certSigLength];
+            byte[] pubKeySizeBytes = BitConverter.GetBytes(serverPubKey.Length);
+            byte[] xmlByteLength = BitConverter.GetBytes((short)serverPubKey.Length);
+            Array.Copy(encryptionModeBytes, 0, unsignedMsg, 0, 2);
+            Array.Copy(pubKeySizeBytes, 0, unsignedMsg, 2, 2);
+            Array.Copy(serverPubKey, 0, unsignedMsg, 4, serverPubKey.Length);
 
-            byte[] rsaSizeBytes = BitConverter.GetBytes(rsaKeySize);
-            byte[] aesSizeBytes = BitConverter.GetBytes(aesKeySize);
-            byte[] xmlByteLength = BitConverter.GetBytes((short)xmlBytes.Length);
-            Array.Copy(rsaSizeBytes, 0, unsignedMsg1, 0, 2);
-            Array.Copy(aesSizeBytes, 0, unsignedMsg1, 2, 2);
-            Array.Copy(xmlBytes, 0, unsignedMsg1, 4, xmlBytes.Length);
-
+            byte[] serverHello;
             //Sign with certificate
             if (certificate != null)
             {
-                byte[] messageHash = SHA512.Create().ComputeHash(unsignedMsg1);
-                byte[] signature = certificate.SignHash(messageHash, HashAlgorithmName.SHA512, RSASignaturePadding.Pkcs1);
+                byte[] messageHash = SHA512.Create().ComputeHash(unsignedMsg);
+                byte[] signature = certificate.SignHash(messageHash, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
 
-                Array.Copy(messageHash, 0, unsignedMsg1, unsignedMsg1.Length - messageHash.Length - signature.Length, 64);
-                Array.Copy(signature, 0, unsignedMsg1, unsignedMsg1.Length - signature.Length, signature.Length);
+                serverHello = new byte[unsignedMsg.Length + signature.Length];
+
+                Array.Copy(unsignedMsg, 0, serverHello, 0, unsignedMsg.Length);
+                serverHello[unsignedMsg.Length - 1] = 1;
+                Array.Copy(signature, 0, serverHello, unsignedMsg.Length, signature.Length);
             }
             else
-                unsignedMsg1[0] = 0;
+                serverHello = unsignedMsg;
 
-            connection.Send(unsignedMsg1, false);
+            connection.Send(unsignedMsg, MessageType.Handshake);
 
 
 
@@ -108,7 +149,7 @@ namespace SecureTCP
         {
             try
             {
-                connection.Send(data);
+                connection.Send(data, MessageType.Normal);
             }
             catch (Exception)
             {
@@ -139,6 +180,17 @@ namespace SecureTCP
             {
                 connection.ShutDown();
             }*/
+        }
+
+        public byte[] ConnectionString(bool includeCertificate)
+        {
+            if (certificate != null)
+            {
+                string xmlString = certificate.ToXmlString(false);
+                
+            }
+
+            return null;
         }
     }
 }
