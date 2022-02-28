@@ -18,7 +18,7 @@ namespace SecureTCP
         public string LocalIpPort { get; private set; }
         public bool Receiving = false;
 
-        private Crypto crypto;
+        public Crypto Crypto { private get; set; }
 
         internal event EventHandler<DataReceivedEventArgs> DataReceived;
 
@@ -36,9 +36,9 @@ namespace SecureTCP
             this.encryptionSettings = encryptionSettings;
         }
 
-        public byte[] ReceiveOnceAsync(bool decrypt = true)
+        public byte[] ReceiveOnceAsync()
         {
-            return ReceiveMessage(decrypt).Result;
+            return ReceiveMessage().Result;
         }
 
         public void BeginReceiving()
@@ -51,39 +51,39 @@ namespace SecureTCP
                 {
                     byte[] message = ReceiveMessage().Result;
 
-                    DataReceived(this, new DataReceivedEventArgs(ReceiveMessage().Result));
+                    DataReceived(this, new DataReceivedEventArgs(message));
                 }
                 catch (Exception) { throw; }
             }
         }
 
-        private async Task<byte[]> ReceiveMessage(bool decrypt = true)
+        private async Task<byte[]> ReceiveMessage()
         {
-            byte[] metaBuffer = new byte[5];
-            MessageType type = ByteToMsgType(metaBuffer[4]);
-//Add code for Shutdown and HandshakeError
-
+            byte[] metaBuffer = new byte[3];
             await socket.ReceiveAsync(metaBuffer, SocketFlags.None);
 
-            int length = BitConverter.ToInt32(metaBuffer);
+            MessageType type = ByteToMsgType(metaBuffer[2]);
+                //Add code for Shutdown and HandshakeError
+
+            int length = BitConverter.ToUInt16(metaBuffer);
             byte[] buffer = new byte[length];
-            byte[] vs = new byte[length + 2];
             socket.ReceiveBufferSize = length;
             await socket.ReceiveAsync(buffer, SocketFlags.None);
 
-            return type == MessageType.Normal ? crypto.Decrypt(buffer) : buffer;
+            return type == MessageType.Normal ? Crypto.Decrypt(buffer) : buffer;
         }
 
-        public async void Send(byte[] message, MessageType type, bool encrypt = true)
+        public async void Send(byte[] message, MessageType type)
         {
             try
             {
-                byte[] lengthBytes = BitConverter.GetBytes(message.Length);
-                byte[] wrapped = new byte[5 + message.Length];
-                message[4] = MsgTypeToByte(type);
+                byte[] processedMessage = type == MessageType.Normal ? Crypto.Encrypt(message) : message;
+                byte[] lengthBytes = BitConverter.GetBytes((ushort)processedMessage.Length);
+                byte[] wrapped = new byte[3 + processedMessage.Length];
+                wrapped[2] = MsgTypeToByte(type);
 
-                Array.Copy(lengthBytes, 0, wrapped, 1, lengthBytes.Length);
-                Array.Copy(message, 0, wrapped, 5, message.Length);
+                Array.Copy(lengthBytes, 0, wrapped, 0, lengthBytes.Length);
+                Array.Copy(processedMessage, 0, wrapped, 3, processedMessage.Length);
 
                 await socket.SendAsync(wrapped, SocketFlags.None);
             }

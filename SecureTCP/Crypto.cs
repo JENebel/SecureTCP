@@ -24,33 +24,22 @@ namespace SecureTCP
 
         public byte[] Decrypt(byte[] data)
         {
-            byte[] iv = data.Take(16).ToArray();
-            byte[] message = data.Skip(16).ToArray();
+            byte[] signature = data.Take(signatureLength).ToArray();
+            byte[] iv = data.Skip(signatureLength).Take(16).ToArray();
+            byte[] message = data.Skip(16 + signatureLength).ToArray();
+            if (!verifier.VerifyHash(SHA512.HashData(message), signature, DSASignatureFormat.IeeeP1363FixedFieldConcatenation))
+                throw new BadSignatureException("Signature validation failed");
             return encrypter.DecryptCbc(message, iv);
         }
 
         public byte[] Encrypt(byte[] data)
         {
             encrypter.GenerateIV();
-            return encrypter.EncryptCbc(data, encrypter.IV);
-        }
-
-        public byte[] VerifiedData(byte[] data)
-        {
-            byte[] signature = data.Take(signatureLength).ToArray();
-            byte[] message = data.Skip(signatureLength).ToArray();
-            if(!verifier.VerifyData(message, signature, HashAlgorithmName.SHA512))
-                throw new BadSignatureException("Bad signature. Wasn't signed by the original key");
-            return message;
-        }
-
-        public byte[] SignData(byte[] data)
-        {
-            byte[] msgWithSignature = new byte[signatureLength + data.Length];
-            byte[] signature = signer.SignHash(SHA512.HashData(data), DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
-            Array.Copy(signature, msgWithSignature, signatureLength);
-            Array.Copy(data, 0, msgWithSignature, signatureLength, data.Length);
-            return msgWithSignature;
+            byte[] encryptedMessage = encrypter.EncryptCbc(data, encrypter.IV).ToArray();
+            byte[] signature = signer.SignHash(SHA512.HashData(encryptedMessage), DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+            return signature.Concat ( // Signature
+                    encrypter.IV.Concat ( // IV
+                     encryptedMessage)).ToArray(); // Encrypted data
         }
     }
 
