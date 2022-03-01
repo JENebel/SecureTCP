@@ -14,14 +14,15 @@ namespace SecureTCP
     public class SecureTcpServer
     {
         private TcpListener server;
-        private Dictionary<string, (Connection c, object keys)> connections;
+        private Dictionary<string, Connection> clients;
         private ECDsa certificate;
-        private ushort port;
-        private string ip;
-
+        
         public bool running { get; private set; } = false;
-        public string IpPort { get { return ip + ":" + port; } }
+        public ushort Port { get; private set; }
+        public string Ip { get; private set; }
+        public string IpPort { get { return Ip + ":" + Port; } }
         public EncryptionSettings EncryptionSettings { get; private set; } = new EncryptionSettings();
+        public string[] Clients { get { return clients.Keys.ToArray(); } }
 
         public event EventHandler<ClientConnectedEventArgs> ClientConnected;
         public event EventHandler<ClientDisconnectedEventArgs> ClientDisconnected;
@@ -29,20 +30,25 @@ namespace SecureTCP
 
         public SecureTcpServer(string ip, ushort port)
         {
-            this.ip = ip;
-            this.port = port;
+            this.Ip = ip;
+            this.Port = port;
         }
 
         public SecureTcpServer(string ip, ushort port, byte[] rawCertificate, string password)
         {
-            this.ip = ip;
-            this.port = port;
+            this.Ip = ip;
+            this.Port = port;
 
             //Load certificate
 
             certificate = ECDsa.Create(ECCurve.NamedCurves.brainpoolP512r1);
             int ut;
             certificate.ImportEncryptedPkcs8PrivateKey(Encoding.UTF8.GetBytes(password), rawCertificate, out ut);
+        }
+
+        public void GenerateCertificate()
+        {
+            certificate = ECDsa.Create(ECCurve.NamedCurves.brainpoolP512r1);
         }
 
         public byte[] ExportCertificate(string password)
@@ -54,6 +60,13 @@ namespace SecureTCP
 
         public string ExportConnectionString()
         {
+            byte[] ipBytes = new byte[6];
+            int len;
+            var i = IPAddress.Parse(Ip);
+            i.TryWriteBytes(ipBytes, out len);
+            Array.Copy(BitConverter.GetBytes(Port), 0, ipBytes, 4, 2);
+            if (certificate == null) return Convert.ToBase64String(ipBytes);
+
             ECParameters ecParameters = certificate.ExportParameters(false);
 
             byte[] rawCS = new byte[6 + ecParameters.Q.X.Length * 2];
@@ -61,12 +74,7 @@ namespace SecureTCP
             ecParameters.Q.X.CopyTo(rawCS, 6);
             ecParameters.Q.Y.CopyTo(rawCS, 6 + ecParameters.Q.X.Length);
 
-            var i = IPAddress.Parse(ip);
-            byte[] ipBytes = new byte[4];
-            int len;
-            i.TryWriteBytes(ipBytes, out len);
-            Array.Copy(ipBytes, 0, rawCS, 0, len);
-            Array.Copy(BitConverter.GetBytes(port), 0, rawCS, 4, 2);
+            Array.Copy(ipBytes, 0, rawCS, 0, 6);
 
             return Convert.ToBase64String(rawCS);
         }
@@ -79,7 +87,8 @@ namespace SecureTCP
 
         public void Start()
         {
-            server = new TcpListener(new IPEndPoint(IPAddress.Parse(ip), port));
+            server = new TcpListener(new IPEndPoint(IPAddress.Parse(Ip), Port));
+            clients = new();
             running = true;
             server.Start();
             Listen();
@@ -92,10 +101,14 @@ namespace SecureTCP
                 try
                 {
                     Socket socket = await server.AcceptSocketAsync();
-                    Connection connection = new Connection(socket, EncryptionSettings);
+                    Connection connection = new Connection(socket);
                     EstablishConnection(connection);
+                    connection.BeginReceiving();
                 }
-                catch (Exception) { }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Jarh lort: " + e.Message);
+                }
             }
         }
 
@@ -158,60 +171,48 @@ namespace SecureTCP
             connection.Crypto = new Crypto(aes, ECDsa.Create(serverECDH.ExportParameters(true)), ECDsa.Create(clientPub.ExportParameters(false)));
 
 
+            clients.Add(connection.RemoteIpPort, connection);
 
-            connection.DataReceived += (s, e) => { MessageReceived(this, new MessageReceivedEventArgs(s as Connection, e.Data)); };
-
-            if(ClientConnected != null) ClientConnected(this, new ClientConnectedEventArgs(connection));
-            connection.BeginReceiving();
+            connection.DataReceived += (s, e) => { MessageReceived(this, new MessageReceivedEventArgs((s as Connection).RemoteIpPort, e.Data)); };
+            if(ClientConnected != null) ClientConnected(this, new ClientConnectedEventArgs(connection.RemoteIpPort));
+            connection.Disconnected += (s, e) => {
+                clients.Remove(connection.RemoteIpPort);
+                if (ClientDisconnected != null) ClientDisconnected(this, new ClientDisconnectedEventArgs(e.IpPort, e.DisconnectReason));
+            };
         }
 
-
-        public void Send(byte[] data, Connection connection)
+        public void Send(byte[] data, string ipPort)
         {
-            try
-            {
-                connection.Send(data, MessageType.Normal);
-            }
-            catch (Exception)
-            {
+            Send(data, clients[ipPort]);
+        }
 
-                connection.ShutDown();
-                ClientDisconnected(this, new ClientDisconnectedEventArgs(connection, DisconnectReason.Error));
-            }
+        private void Send(byte[] data, Connection client)
+        {
+            client.Send(data, MessageType.Normal);
         }
 
         public void BroadCast(byte[] data)
         {
-            /*foreach (Connection connection in connections.Keys)
+            foreach (Connection client in clients.Values)
             {
-                Send(data, connection);
-            }*/
+                Send(data, client);
+            }
         }
 
         public void Stop()
         {
             server.Stop();
             running = false;
-            connections.Clear();
+            clients.Clear();
         }
 
         public void DisconnectAll()
         {
-            /*foreach (Connection connection in connections.Keys)
+            foreach (Connection connection in clients.Values)
             {
-                connection.ShutDown();
-            }*/
-        }
-
-        public byte[] ConnectionString(bool includeCertificate)
-        {
-            if (certificate != null)
-            {
-                string xmlString = certificate.ToXmlString(false);
-                
+                connection.ShutDown(DisconnectReason.Normal);
             }
-
-            return null;
+            clients = new();
         }
     }
 }

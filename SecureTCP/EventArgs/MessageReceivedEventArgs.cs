@@ -8,12 +8,12 @@ namespace SecureTCP
 {
     public class MessageReceivedEventArgs : EventArgs
     {
-        public Connection Connection { get; private set; }
+        public string IpPort { get; private set; }
         public byte[] Data { get; private set; }
 
-        public MessageReceivedEventArgs(Connection connection, byte[] data)
+        public MessageReceivedEventArgs(string ipPort, byte[] data)
         {
-            Connection = connection;
+            IpPort = ipPort;
             Data = data;
         }
     }
