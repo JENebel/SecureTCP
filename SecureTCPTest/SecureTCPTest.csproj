@@ -8,10 +8,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Sodium.Core" Version="1.2.3" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="..\SecureTCP\SecureTCP.csproj" />
   </ItemGroup>
 

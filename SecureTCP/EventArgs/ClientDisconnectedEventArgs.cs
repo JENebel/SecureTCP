@@ -6,17 +6,19 @@ using System.Threading.Tasks;
 
 namespace SecureTCP
 {
-    public enum DisconnectReason { Normal, Disconnected, SecurityError, ServerClosed}
+    public enum DisconnectReason { Expected, Unexpected}
 
     public class ClientDisconnectedEventArgs
     {
         public string IpPort { get; private set; }
+        public string Reason { get; private set; }
         public DisconnectReason DisconnectReason { get; private set; }
 
-        public ClientDisconnectedEventArgs(string ipPort, DisconnectReason reason)
+        public ClientDisconnectedEventArgs(string ipPort, DisconnectReason disconnectReason, string reason)
         {
             IpPort = ipPort;
-            DisconnectReason = reason;
+            Reason = reason;
+            DisconnectReason = disconnectReason;
         }
     }
 }
