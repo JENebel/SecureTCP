@@ -10,13 +10,15 @@ namespace SecureTCP
         private Connection connection;
 
         public string ServerIpPort { get { return connection.RemoteIpPort; } }
+        public string LocalIpPort { get { return connection.LocalIpPort; } }
         public bool Connected { get; private set; }
+        public bool Certified { get; private set; }
 
         public event EventHandler<ClientConnectedEventArgs> ClientConnected;
         public event EventHandler<ClientDisconnectedEventArgs> ClientDisconnected;
         public event EventHandler<MessageReceivedEventArgs> MessageReceived;
 
-        public void Connect(string connectionString)
+        public async Task Connect(string connectionString)
         {
             byte[] connectionData = Convert.FromBase64String(connectionString);
             byte[] ipBytes = connectionData.Take(4).ToArray();
@@ -26,16 +28,16 @@ namespace SecureTCP
             ushort port = BitConverter.ToUInt16(portBytes);
             byte[] certKey = connectionData.Skip(6).ToArray();
 
-            if (certKey.Length == 0) Connect(ipString, port);
-            else Connect(ipString, port, certKey);
+            if (certKey.Length == 0) await Connect(ipString, port);
+            else await Connect(ipString, port, certKey);
         }
 
-        public void Connect(string ip, ushort port)
+        public async Task Connect(string ip, ushort port)
         {
-            Connect(ip, port, null);
+            await Connect(ip, port, null);
         }
 
-        private async void Connect(string ip, ushort port, byte[] publicCertificateKey)
+        private async Task Connect(string ip, ushort port, byte[] publicCertificateKey)
         {
             if (Connected) throw new Exception("Already connected");
             try
@@ -43,6 +45,7 @@ namespace SecureTCP
                 Socket socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
                 await socket.ConnectAsync(IPAddress.Parse(ip), port);
                 connection = new Connection(socket);
+                Certified = false;
 
                 //Receive serverHello
                 byte[] serverHello = connection.ReceiveOnceAsync();
@@ -70,6 +73,7 @@ namespace SecureTCP
                         //Verify
                         if (!verifier.VerifyHash(messageHash, signature)) 
                             throw new BadSignatureException("Certificate signature verification failed");
+                        Certified = true;
                     }
                     else
                         throw new Exception("No certificate signature received");
@@ -107,7 +111,7 @@ namespace SecureTCP
                 connection.DataReceived += (s, e) => { MessageReceived(this, new MessageReceivedEventArgs((s as Connection).RemoteIpPort, e.Data)); };
                 connection.Disconnected += (s, e) => {
                     Connected = false;
-                    if (ClientDisconnected != null) ClientDisconnected(this, new ClientDisconnectedEventArgs(e.IpPort, e.DisconnectReason));
+                    if (ClientDisconnected != null) ClientDisconnected(this, e);
                 };
                 if (ClientConnected != null) ClientConnected(this, new ClientConnectedEventArgs(connection.RemoteIpPort));
                 connection.BeginReceiving();
@@ -128,7 +132,7 @@ namespace SecureTCP
         {
             if (Connected)
             {
-                connection.ShutDown(DisconnectReason.Normal);
+                connection.ShutDown();
             }
         }
     }

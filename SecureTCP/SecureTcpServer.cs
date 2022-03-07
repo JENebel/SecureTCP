@@ -17,7 +17,7 @@ namespace SecureTCP
         private Dictionary<string, Connection> clients;
         private ECDsa certificate;
         
-        public bool running { get; private set; } = false;
+        public bool Running { get; private set; } = false;
         public ushort Port { get; private set; }
         public string Ip { get; private set; }
         public string IpPort { get { return Ip + ":" + Port; } }
@@ -89,14 +89,14 @@ namespace SecureTCP
         {
             server = new TcpListener(new IPEndPoint(IPAddress.Parse(Ip), Port));
             clients = new();
-            running = true;
+            Running = true;
             server.Start();
             Listen();
         }
 
         private async void Listen()
         {
-            while (running)
+            while (Running)
             {
                 try
                 {
@@ -105,10 +105,7 @@ namespace SecureTCP
                     EstablishConnection(connection);
                     connection.BeginReceiving();
                 }
-                catch (Exception e)
-                {
-                    Console.WriteLine("Jarh lort: " + e.Message);
-                }
+                catch { }
             }
         }
 
@@ -177,7 +174,7 @@ namespace SecureTCP
             if(ClientConnected != null) ClientConnected(this, new ClientConnectedEventArgs(connection.RemoteIpPort));
             connection.Disconnected += (s, e) => {
                 clients.Remove(connection.RemoteIpPort);
-                if (ClientDisconnected != null) ClientDisconnected(this, new ClientDisconnectedEventArgs(e.IpPort, e.DisconnectReason));
+                if (ClientDisconnected != null) ClientDisconnected(this, e);
             };
         }
 
@@ -202,17 +199,23 @@ namespace SecureTCP
         public void Stop()
         {
             server.Stop();
-            running = false;
+            Running = false;
+            DisconnectAll();
             clients.Clear();
         }
 
         public void DisconnectAll()
         {
-            foreach (Connection connection in clients.Values)
+            foreach (string ipPort in Clients)
             {
-                connection.ShutDown(DisconnectReason.Normal);
+                Disconnect(ipPort);
             }
-            clients = new();
+        }
+
+        public void Disconnect(string ipPort)
+        {
+            clients[ipPort].ShutDown();
+            clients.Remove(ipPort);
         }
     }
 }

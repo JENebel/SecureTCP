@@ -27,10 +27,10 @@ namespace SecureTCP
         {
             this.socket = socket;
             IPEndPoint remoteIpEndPoint = socket.RemoteEndPoint as IPEndPoint;
-            RemoteIpPort = remoteIpEndPoint.Address.ToString() + ":" + remoteIpEndPoint.Port;
+            RemoteIpPort = remoteIpEndPoint.Address.ToString().TrimStart(new char[] {':', 'f'}) + ":" + remoteIpEndPoint.Port;
 
             IPEndPoint localIpEndPoint = socket.LocalEndPoint as IPEndPoint;
-            LocalIpPort = localIpEndPoint.Address.ToString() + ":" + localIpEndPoint.Port;
+            LocalIpPort = localIpEndPoint.Address.ToString().TrimStart(new char[] { ':', 'f' }) + ":" + localIpEndPoint.Port;
         }
 
         public byte[] ReceiveOnceAsync()
@@ -38,22 +38,36 @@ namespace SecureTCP
             return ReceiveMessage().Result;
         }
 
-        public void BeginReceiving()
+        public async void BeginReceiving()
         {
             if (Receiving) return;
+            Receiving = true;
 
             while (socket.Connected)
             {
                 try
                 {
-                    byte[] message = ReceiveMessage().Result;
+                    byte[] message = await ReceiveMessage();
 
                     DataReceived(this, new DataReceivedEventArgs(message));
                 }
-                catch (Exception) 
+                catch (AggregateException e)
                 {
-                    throw new NotImplementedException("Receive failed should probably disconnect");
+                    var ex = e.GetBaseException();
+                    if (ex.GetType() == typeof(SocketException))
+                    {
+                        SocketException se = ex as SocketException;
+                        if (se.SocketErrorCode == SocketError.ConnectionReset)
+                        {
+                            ConnectionLost();
+                        }
+                    }
                 }
+                catch (BadSignatureException) 
+                {
+                    ShutDown("Bad Signature");
+                }
+                catch { ConnectionLost(); }
             }
         }
 
@@ -76,7 +90,8 @@ namespace SecureTCP
                     await socket.ReceiveAsync(buffer, SocketFlags.None);
                 }
 
-                if (type != MessageType.Normal && type != MessageType.Handshake) HandleSystemMessage(buffer, type);
+                if (type != MessageType.Normal && type != MessageType.Handshake)
+                    HandleSystemMessage(buffer, type);
             }
             
             return type == MessageType.Normal? Crypto.Decrypt(buffer) : buffer;
@@ -91,10 +106,10 @@ namespace SecureTCP
                 case MessageType.Handshake:
                     throw new ArgumentException("Handshake mesage not expected to end up here");
                 case MessageType.Shutdown:
-                    ShutDown(DisconnectReason.ServerClosed);
+                    ShutDown("Terminated by server");
                     break;
                 case MessageType.SecurityError:
-                    ShutDown(DisconnectReason.SecurityError);
+                    ShutDown("Remote security error");
                     break;
                 case MessageType.None:
                     throw new ArgumentException("Handshake mesage not expected to end up here");
@@ -119,21 +134,37 @@ namespace SecureTCP
             }
             catch (Exception)
             {
-                ShutDown(DisconnectReason.ServerClosed);
+                ConnectionLost();
             }
         }
 
-        public void ShutDown(DisconnectReason reason)
+        public void ShutDown()
+        {
+            ShutDown("Expected shutdown");
+        }
+
+        private void ShutDown(string reason)
         {
             try
             {
-                Send(new byte[0], MessageType.Shutdown); //Try to gracefully close other end
+                Send(new byte[0], MessageType.Shutdown);
+                socket.Shutdown(SocketShutdown.Both);
             }
-            catch (Exception)
-            { }
+            catch (Exception) { }
+            
+            Disconnected(this, new ClientDisconnectedEventArgs(RemoteIpPort, DisconnectReason.Expected, reason));
+        }
 
-            socket.Shutdown(SocketShutdown.Both);
-            Disconnected(this, new ClientDisconnectedEventArgs(RemoteIpPort, reason));
+        private void ConnectionLost()
+        {
+            socket.Shutdown(SocketShutdown.Send);
+            try
+            {
+                socket.Shutdown(SocketShutdown.Receive);
+            }
+            catch { }
+
+            Disconnected(this, new ClientDisconnectedEventArgs(RemoteIpPort, DisconnectReason.Unexpected, "Connection lost"));
         }
 
         byte MsgTypeToByte(MessageType type)
