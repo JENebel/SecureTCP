@@ -9,9 +9,9 @@ using System.Net;
 
 namespace SecureTCP
 {
-    public enum MessageType { Normal, Handshake, Shutdown, HandshakeError }
+    internal enum MessageType { Normal, Handshake, Shutdown, SecurityError, None }
 
-    public class Connection
+    internal class Connection
     {
         private Socket socket;
         public string RemoteIpPort { get; private set; }
@@ -21,19 +21,16 @@ namespace SecureTCP
         public Crypto Crypto { private get; set; }
 
         internal event EventHandler<DataReceivedEventArgs> DataReceived;
+        internal event EventHandler<ClientDisconnectedEventArgs> Disconnected;
 
-        private EncryptionSettings encryptionSettings;
-
-        public Connection(Socket socket, EncryptionSettings encryptionSettings = null)
+        public Connection(Socket socket)
         {
             this.socket = socket;
             IPEndPoint remoteIpEndPoint = socket.RemoteEndPoint as IPEndPoint;
             RemoteIpPort = remoteIpEndPoint.Address.ToString() + ":" + remoteIpEndPoint.Port;
 
             IPEndPoint localIpEndPoint = socket.LocalEndPoint as IPEndPoint;
-            RemoteIpPort = localIpEndPoint.Address.ToString() + ":" + localIpEndPoint.Port;
-
-            this.encryptionSettings = encryptionSettings;
+            LocalIpPort = localIpEndPoint.Address.ToString() + ":" + localIpEndPoint.Port;
         }
 
         public byte[] ReceiveOnceAsync()
@@ -53,24 +50,57 @@ namespace SecureTCP
 
                     DataReceived(this, new DataReceivedEventArgs(message));
                 }
-                catch (Exception) { throw; }
+                catch (Exception) 
+                {
+                    throw new NotImplementedException("Receive failed should probably disconnect");
+                }
             }
         }
 
         private async Task<byte[]> ReceiveMessage()
         {
             byte[] metaBuffer = new byte[3];
-            await socket.ReceiveAsync(metaBuffer, SocketFlags.None);
+            byte[] buffer = new byte[0];
+            MessageType type = MessageType.None;
+            while (!(type == MessageType.Normal || type == MessageType.Handshake))
+            {
+                await socket.ReceiveAsync(metaBuffer, SocketFlags.None);
 
-            MessageType type = ByteToMsgType(metaBuffer[2]);
-                //Add code for Shutdown and HandshakeError
+                type = ByteToMsgType(metaBuffer[2]);
 
-            int length = BitConverter.ToUInt16(metaBuffer);
-            byte[] buffer = new byte[length];
-            socket.ReceiveBufferSize = length;
-            await socket.ReceiveAsync(buffer, SocketFlags.None);
+                int length = BitConverter.ToUInt16(metaBuffer);
 
-            return type == MessageType.Normal ? Crypto.Decrypt(buffer) : buffer;
+                if (length > 0)
+                {
+                    buffer = new byte[length];
+                    await socket.ReceiveAsync(buffer, SocketFlags.None);
+                }
+
+                if (type != MessageType.Normal && type != MessageType.Handshake) HandleSystemMessage(buffer, type);
+            }
+            
+            return type == MessageType.Normal? Crypto.Decrypt(buffer) : buffer;
+        }
+
+        private void HandleSystemMessage(byte[] data, MessageType type)
+        {
+            switch (type)
+            {
+                case MessageType.Normal:
+                    throw new ArgumentException("Normal mesage not expected to end up here");
+                case MessageType.Handshake:
+                    throw new ArgumentException("Handshake mesage not expected to end up here");
+                case MessageType.Shutdown:
+                    ShutDown(DisconnectReason.ServerClosed);
+                    break;
+                case MessageType.SecurityError:
+                    ShutDown(DisconnectReason.SecurityError);
+                    break;
+                case MessageType.None:
+                    throw new ArgumentException("Handshake mesage not expected to end up here");
+                default:
+                    throw new ArgumentException("Unknown Message Type");
+            }
         }
 
         public async void Send(byte[] message, MessageType type)
@@ -89,13 +119,21 @@ namespace SecureTCP
             }
             catch (Exception)
             {
-                throw new Exception("Send failed");
+                ShutDown(DisconnectReason.ServerClosed);
             }
         }
 
-        public void ShutDown()
+        public void ShutDown(DisconnectReason reason)
         {
-            socket.Shutdown(SocketShutdown.Send);
+            try
+            {
+                Send(new byte[0], MessageType.Shutdown); //Try to gracefully close other end
+            }
+            catch (Exception)
+            { }
+
+            socket.Shutdown(SocketShutdown.Both);
+            Disconnected(this, new ClientDisconnectedEventArgs(RemoteIpPort, reason));
         }
 
         byte MsgTypeToByte(MessageType type)
@@ -108,7 +146,7 @@ namespace SecureTCP
                     return 1;
                 case MessageType.Shutdown:
                     return 2;
-                case MessageType.HandshakeError:
+                case MessageType.SecurityError:
                     return 3;
                 default:
                     throw new Exception("No byte value corresponding to " + type.ToString());
@@ -126,7 +164,7 @@ namespace SecureTCP
                 case 2:
                     return MessageType.Shutdown;
                 case 3:
-                    return MessageType.HandshakeError;
+                    return MessageType.SecurityError;
                 default:
                     throw new Exception("No message type corresponding to " + msgByte);
             }

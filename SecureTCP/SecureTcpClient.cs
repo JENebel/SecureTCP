@@ -22,19 +22,26 @@ namespace SecureTCP
             byte[] ipBytes = connectionData.Take(4).ToArray();
             string ipString = ipBytes[0] + "." + ipBytes[1] + "." + ipBytes[2] + "." + ipBytes[3];
 
-            byte[] port = connectionData.Skip(4).Take(2).ToArray();
+            byte[] portBytes = connectionData.Skip(4).Take(2).ToArray();
+            ushort port = BitConverter.ToUInt16(portBytes);
             byte[] certKey = connectionData.Skip(6).ToArray();
 
-            Connect(ipString, BitConverter.ToUInt16(port), certKey);
+            if (certKey.Length == 0) Connect(ipString, port);
+            else Connect(ipString, port, certKey);
         }
 
-        private async void Connect(string ip, ushort port, byte[] publicCertificateKey = null)
+        public void Connect(string ip, ushort port)
         {
-            if (Connected) return;
+            Connect(ip, port, null);
+        }
+
+        private async void Connect(string ip, ushort port, byte[] publicCertificateKey)
+        {
+            if (Connected) throw new Exception("Already connected");
             try
             {
                 Socket socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
-                await socket.ConnectAsync(IPAddress.Parse(ip), (int)port);
+                await socket.ConnectAsync(IPAddress.Parse(ip), port);
                 connection = new Connection(socket);
 
                 //Receive serverHello
@@ -97,9 +104,12 @@ namespace SecureTCP
 
 
                 Connected = true;
-                connection.DataReceived += (s, e) => { MessageReceived(this, new MessageReceivedEventArgs(s as Connection, e.Data)); };
-
-                if (ClientConnected != null) ClientConnected(this, new ClientConnectedEventArgs(connection));
+                connection.DataReceived += (s, e) => { MessageReceived(this, new MessageReceivedEventArgs((s as Connection).RemoteIpPort, e.Data)); };
+                connection.Disconnected += (s, e) => {
+                    Connected = false;
+                    if (ClientDisconnected != null) ClientDisconnected(this, new ClientDisconnectedEventArgs(e.IpPort, e.DisconnectReason));
+                };
+                if (ClientConnected != null) ClientConnected(this, new ClientConnectedEventArgs(connection.RemoteIpPort));
                 connection.BeginReceiving();
             }
             catch (Exception e)
@@ -108,21 +118,17 @@ namespace SecureTCP
             }
         }
 
-        private void OnMessageReceived(object sender, DataReceivedEventArgs e)
-        {
-
-        }
-
         public void Send(byte[] data)
         {
-            try
+            if (!Connected) throw new Exception("Cannot send message when not connected");
+            connection.Send(data, MessageType.Normal);
+        }
+
+        public void Disconnect()
+        {
+            if (Connected)
             {
-                connection.Send(data, MessageType.Normal);
-            }
-            catch (Exception)
-            {
-                connection.ShutDown();
-                ClientDisconnected(this, new ClientDisconnectedEventArgs(connection, DisconnectReason.Error));
+                connection.ShutDown(DisconnectReason.Normal);
             }
         }
     }

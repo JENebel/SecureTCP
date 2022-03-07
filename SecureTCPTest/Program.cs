@@ -4,34 +4,42 @@ using System.Text;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Net;
+using System.Diagnostics;
 
-ECDsa ecd = ECDsa.Create(ECCurve.NamedCurves.brainpoolP512r1);
 
-var pbep = new PbeParameters(PbeEncryptionAlgorithm.Aes256Cbc, HashAlgorithmName.SHA512, 11111);
-SecureTcpServer server = new SecureTcpServer("127.0.0.1", 13222, Convert.FromBase64String(Convert.ToBase64String(ecd.ExportEncryptedPkcs8PrivateKey(Encoding.UTF8.GetBytes("password"), pbep))), "password");
-var en = new EncryptionSettings(EncryptionSettings.AesType.AES_128, EncryptionSettings.CurveType.Nist521);
+SecureTcpServer server = new SecureTcpServer("127.0.0.1", 45111);
 
-server.Start(en);
 
 SecureTcpClient client = new SecureTcpClient();
-client.ClientConnected += Con;
-client.Connect(server.ExportConnectionString());
 
-server.MessageReceived += Received;
-client.MessageReceived += Received;
+client.ClientConnected += ClientConnected;
+server.ClientConnected += ServerConnected;
+server.ClientDisconnected += ServerDisconnected;
 
-while (true)
+
+
+server.Start();
+client.Connect("127.0.0.1", 45111);
+
+Console.ReadLine();
+
+
+void ServerConnected(object sender, ClientConnectedEventArgs e)
 {
-    Console.ReadLine();
+    Console.WriteLine("Incoming from: " + e.IpPort);
 }
 
-void Con(object sender, ClientConnectedEventArgs e)
+void ClientConnected(object sender, ClientConnectedEventArgs e)
 {
-    client.Send(Encoding.UTF8.GetBytes("Hej"));
-    server.BroadCast(Encoding.UTF8.GetBytes("Succes"));
+    var asr = server.Clients;
+    server.Send(Encoding.UTF8.GetBytes("Johnny"), asr[0]);
+    Thread.Sleep(1000);
+    client.Disconnect();
 }
 
-void Received(object sender, MessageReceivedEventArgs e)
+void ServerDisconnected(object sender, ClientDisconnectedEventArgs e)
 {
-    Console.WriteLine(Encoding.UTF8.GetString(e.Data));
+    Console.WriteLine("Disconnected: " + e.IpPort);
+
+    var asr = server.Clients;
 }
