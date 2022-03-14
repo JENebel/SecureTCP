@@ -17,6 +17,7 @@ namespace SecureTCP
         public event EventHandler<ClientConnectedEventArgs> ClientConnected;
         public event EventHandler<ClientDisconnectedEventArgs> ClientDisconnected;
         public event EventHandler<MessageReceivedEventArgs> MessageReceived;
+        public Func<byte[], string, byte[]> Respond { set { connection.Respond = value; } }
 
         public async Task Connect(string connectionString)
         {
@@ -141,6 +142,11 @@ namespace SecureTCP
         {
             if (!Connected) throw new Exception("Cannot send message when not connected");
             connection.Send(data, MessageType.Normal);
+        }
+
+        public async Task<byte[]> SendAndWait(byte[] data)
+        {
+            return await connection.SendAndWait(data);
         }
 
         public void Disconnect()

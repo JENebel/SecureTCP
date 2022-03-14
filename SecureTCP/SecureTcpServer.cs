@@ -28,6 +28,30 @@ namespace SecureTCP
         public event EventHandler<ClientDisconnectedEventArgs> ClientDisconnected;
         public event EventHandler<MessageReceivedEventArgs> MessageReceived;
 
+        object responseLock = new object();
+        private Func<byte[], string, byte[]> _respond;
+        public Func<byte[], string, byte[]> Respond
+        {
+            get
+            {
+                lock (responseLock)
+                {
+                    return _respond;
+                }
+            }
+            set
+            {
+                lock (responseLock)
+                {
+                    _respond = value;
+                    foreach (Connection connection in clients.Values)
+                    {
+                        connection.Respond = _respond;
+                    }
+                }
+            }
+        }
+
         public SecureTcpServer(string ip, ushort port)
         {
             this.Ip = ip;
@@ -171,7 +195,7 @@ namespace SecureTCP
             aes.Key = sharedSecret.Take(EncryptionSettings.AesKeySize / 8).ToArray();
 
             connection.Crypto = new Crypto(aes, ECDsa.Create(serverECDH.ExportParameters(true)), ECDsa.Create(clientPub.ExportParameters(false)));
-
+            connection.Respond = Respond;
 
             clients.Add(connection.RemoteIpPort, connection);
 
@@ -191,6 +215,11 @@ namespace SecureTCP
         private void Send(byte[] data, Connection client)
         {
             client.Send(data, MessageType.Normal);
+        }
+
+        public async Task<byte[]> SendAndWait(byte[] data, string ipPort)
+        {
+            return await clients[ipPort].SendAndWait(data);
         }
 
         public void BroadCast(byte[] data)
