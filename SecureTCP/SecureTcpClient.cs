@@ -28,13 +28,20 @@ namespace SecureTCP
             ushort port = BitConverter.ToUInt16(portBytes);
             byte[] certKey = connectionData.Skip(6).ToArray();
 
-            if (certKey.Length == 0) await Connect(ipString, port);
-            else await Connect(ipString, port, certKey);
+            Task t = Connect(ipString, port, certKey.Length != 0 ? certKey : null);
+            if (await Task.WhenAny(t, Task.Delay(3000)) != t)
+            {
+                throw new Exception("Connection attempt timed out");
+            }
         }
 
         public async Task Connect(string ip, ushort port)
         {
-            await Connect(ip, port, null);
+            Task t = Connect(ip, port, null);
+            if (await Task.WhenAny(t, Task.Delay(3000)) != t)
+            {
+                throw new Exception("Connection attempt timed out");
+            }
         }
 
         private async Task Connect(string ip, ushort port, byte[] publicCertificateKey)
@@ -47,6 +54,10 @@ namespace SecureTCP
                 connection = new Connection(socket);
                 Certified = false;
 
+                //Send random data
+                byte[] randData = RandomNumberGenerator.GetBytes(256);
+                connection.Send(randData, MessageType.Handshake);
+
                 //Receive serverHello
                 byte[] serverHello = connection.ReceiveOnceAsync();
                 EncryptionSettings ES = EncryptionSettings.FromBytes(serverHello.Take(2).ToArray());
@@ -55,9 +66,9 @@ namespace SecureTCP
 
                 if (publicCertificateKey != null) // Check signature
                 {
-                    if (serverHello[4 + keyLength] == 1) // If certificate received
+                    if (serverHello[4 + keyLength + randData.Length] == 1) // If certificate received
                     {
-                        //Setup verifier
+                        //Setup verifier from connection string
                         ECDsa verifier = ECDsa.Create();
                         ECParameters ecParams = new ECParameters();
                         ecParams.Q.X = publicCertificateKey.Take(publicCertificateKey.Length / 2).ToArray();
@@ -66,8 +77,12 @@ namespace SecureTCP
                         verifier.ImportParameters(ecParams);
 
                         //Get message hash & signature
-                        byte[] signature = serverHello.Skip(5 + keyLength).ToArray();
-                        byte[] serverHelloNoSignature = serverHello.Take(4 + keyLength).ToArray();
+                        byte[] serverRandData = serverHello.Skip(4 + keyLength).Take(randData.Length).ToArray();
+                        if(!serverRandData.SequenceEqual(randData))
+                            throw new BadSignatureException("Random data doesn't match up");
+
+                        byte[] serverHelloNoSignature = serverHello.Take(serverHello.Length - verifier.GetMaxSignatureSize(DSASignatureFormat.IeeeP1363FixedFieldConcatenation)).ToArray();
+                        byte[] signature = serverHello.Skip(serverHelloNoSignature.Length).ToArray();
                         byte[] messageHash = SHA512.HashData(serverHelloNoSignature);
 
                         //Verify
@@ -76,7 +91,7 @@ namespace SecureTCP
                         Certified = true;
                     }
                     else
-                        throw new Exception("No certificate signature received");
+                        throw new BadSignatureException("No certificate signature received");
                 }
 
                 ECDiffieHellman serverPub = ECDiffieHellman.Create();

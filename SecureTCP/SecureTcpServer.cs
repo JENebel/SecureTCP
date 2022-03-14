@@ -111,6 +111,9 @@ namespace SecureTCP
 
         private void EstablishConnection(Connection connection)
         {
+            //Receive RandData
+            byte[] randData = connection.ReceiveOnceAsync();
+
             //send ServerHello
             short aesKeySize = EncryptionSettings.AesKeySize;
             ECCurve curve = EncryptionSettings.ECCurve;
@@ -124,25 +127,27 @@ namespace SecureTCP
             
             byte[] encryptionModeBytes = EncryptionSettings.ToBytes();
 
-            byte[] unsignedMsg = new byte[4 + serverPubKey.Length + 1];
+            byte[] unsignedMsg = new byte[4 + serverPubKey.Length + randData.Length + 1];
 
             byte[] pubKeySizeBytes = BitConverter.GetBytes((short)serverPubKey.Length);
 
             Array.Copy(encryptionModeBytes, 0, unsignedMsg, 0, 2);
             Array.Copy(pubKeySizeBytes, 0, unsignedMsg, 2, 2);
             Array.Copy(serverPubKey, 0, unsignedMsg, 4, serverPubKey.Length);
+            Array.Copy(randData, 0, unsignedMsg, 4 + serverPubKey.Length, randData.Length);
 
             byte[] serverHello;
             //Sign with certificate
             if (certificate != null)
             {
-                byte[] messageHash = SHA512.Create().ComputeHash(unsignedMsg.Take(unsignedMsg.Length - 1).ToArray());
+                unsignedMsg[unsignedMsg.Length - 1] = 1;
+
+                byte[] messageHash = SHA512.Create().ComputeHash(unsignedMsg);
                 byte[] signature = certificate.SignHash(messageHash, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
 
                 serverHello = new byte[unsignedMsg.Length + signature.Length];
 
                 Array.Copy(unsignedMsg, 0, serverHello, 0, unsignedMsg.Length);
-                serverHello[unsignedMsg.Length - 1] = 1;
                 Array.Copy(signature, 0, serverHello, unsignedMsg.Length, signature.Length);
             }
             else
