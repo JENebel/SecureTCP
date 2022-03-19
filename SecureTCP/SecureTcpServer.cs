@@ -39,8 +39,11 @@ namespace SecureTCP
             this.Ip = ip;
             this.Port = port;
 
-            //Load certificate
+            LoadCertificate(rawCertificate, password);
+        }
 
+        public void LoadCertificate(byte[] rawCertificate, string password)
+        {
             certificate = ECDsa.Create(ECCurve.NamedCurves.brainpoolP512r1);
             int ut;
             certificate.ImportEncryptedPkcs8PrivateKey(Encoding.UTF8.GetBytes(password), rawCertificate, out ut);

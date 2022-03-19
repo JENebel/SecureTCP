@@ -95,6 +95,7 @@ async void RunTests()
     server.Start();
     await secureClient.Connect(conString);
     await client.Connect(server.Ip, server.Port);
+    Wait();
     AssertEquals(server.Clients[0], secureClient.LocalIpPort);
     AssertEquals(server.Clients[1], client.LocalIpPort);
     AssertTrue(server.Running);
