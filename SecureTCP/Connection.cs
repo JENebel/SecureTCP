@@ -20,21 +20,21 @@ namespace SecureTCP
         public Func<byte[], string, byte[]> Respond = null;
 
         object responseLock = new object();
-        private TaskCompletionSource<byte[]> _response;
-        private TaskCompletionSource<byte[]> response
+        private Dictionary<int, TaskCompletionSource<byte[]>> _responses;
+        private Dictionary<int, TaskCompletionSource<byte[]>> responses
         {
             get 
             { 
                 lock (responseLock)
                 {
-                    return _response;
+                    return _responses;
                 } 
             }
             set
             {
                 lock (responseLock)
                 {
-                    _response = value;
+                    _responses = value;
                 }
             }
         }
@@ -52,6 +52,8 @@ namespace SecureTCP
 
             IPEndPoint localIpEndPoint = socket.LocalEndPoint as IPEndPoint;
             LocalIpPort = localIpEndPoint.Address.ToString().TrimStart(new char[] { ':', 'f' }) + ":" + localIpEndPoint.Port;
+
+            responses = new Dictionary<int, TaskCompletionSource<byte[]>>();
         }
 
         public byte[] ReceiveOnceAsync()
@@ -137,14 +139,17 @@ namespace SecureTCP
                 case MessageType.Request:
                     if (Respond != null)
                     {
-                        byte[] resp = Respond(data, RemoteIpPort);
-                        Send(resp, MessageType.Response);
+                        byte[] resp = Respond(data.Skip(1).ToArray(), RemoteIpPort);
+                        byte[] result = new byte[resp.Length + 1];
+                        result[0] = data[0];
+                        Array.Copy(resp, 0, result, 1, resp.Length);
+                        Send(result, MessageType.Response);
                     }
                     break;
                 case MessageType.Response:
-                    if (response != null)
+                    if (responses.ContainsKey(data[0]))
                     {
-                        response.TrySetResult(data);
+                        responses[data[0]].TrySetResult(data.Skip(1).ToArray());
                     }
                     break;
                 default:
@@ -174,15 +179,24 @@ namespace SecureTCP
 
         public async Task<byte[]> SendAndWait(byte[] requestData)
         {
-            response = new TaskCompletionSource<byte[]>();
+            if (responses.Count > 256) throw new Exception("Too many requests at a time. Max is 256");
+            
+            int k = 0;
+            while (responses.ContainsKey(k))
+            {
+                k++;
+            }
+
+            var tcs = new TaskCompletionSource<byte[]>();
+            responses.Add(k, tcs);
             byte[] result = null;
             Send(requestData, MessageType.Request);
-            await Task.WhenAny(response.Task, Task.Delay(30000));
-            if (response.Task.IsCompleted)
-                result = response.Task.Result;
+            await Task.WhenAny(tcs.Task, Task.Delay(30000));
+            if (tcs.Task.IsCompleted)
+                result = tcs.Task.Result;
             else
                 throw new Exception("Request timed out");
-            response = null;
+            responses.Remove(k);
             return result;
         }
 

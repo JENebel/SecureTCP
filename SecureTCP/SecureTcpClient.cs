@@ -124,7 +124,7 @@ namespace SecureTCP
 
 
                 Connected = true;
-                connection.DataReceived += (s, e) => { MessageReceived(this, new MessageReceivedEventArgs((s as Connection).RemoteIpPort, e.Data)); };
+                connection.DataReceived += (s, e) => { if (MessageReceived != null) MessageReceived(this, new MessageReceivedEventArgs((s as Connection).RemoteIpPort, e.Data)); };
                 connection.Disconnected += (s, e) => {
                     Connected = false;
                     if (ClientDisconnected != null) ClientDisconnected(this, e);
