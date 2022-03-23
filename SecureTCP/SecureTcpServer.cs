@@ -248,8 +248,11 @@ namespace SecureTCP
 
         public void Disconnect(string ipPort)
         {
-            clients[ipPort].ShutDown();
-            clients.Remove(ipPort);
+            if (clients.ContainsKey(ipPort))
+            {
+                clients[ipPort].ShutDown();
+                clients.Remove(ipPort);
+            }
         }
     }
 }

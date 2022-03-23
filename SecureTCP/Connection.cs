@@ -90,7 +90,7 @@ namespace SecureTCP
                 {
                     ShutDown("Bad Signature");
                 }
-                catch { ConnectionLost(); }
+                catch (Exception e) { Console.WriteLine(e.Message); ConnectionLost(); }
             }
         }
 
@@ -190,6 +190,9 @@ namespace SecureTCP
             var tcs = new TaskCompletionSource<byte[]>();
             responses.Add(k, tcs);
             byte[] result = null;
+            byte[] requestMsg = new byte[requestData.Length + 1];
+            requestMsg[0] = (byte)k;
+            Array.Copy(requestData, 0, requestMsg, 1, requestData.Length);
             Send(requestData, MessageType.Request);
             await Task.WhenAny(tcs.Task, Task.Delay(30000));
             if (tcs.Task.IsCompleted)
