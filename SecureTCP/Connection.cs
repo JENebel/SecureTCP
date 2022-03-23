@@ -9,7 +9,7 @@ using System.Net;
 
 namespace SecureTCP
 {
-    internal enum MessageType { Normal, Handshake, Shutdown, SecurityError, None }
+    internal enum MessageType { Normal, Handshake, Shutdown, SecurityError, Request, Response, None }
 
     internal class Connection
     {
@@ -17,6 +17,27 @@ namespace SecureTCP
         public string RemoteIpPort { get; private set; }
         public string LocalIpPort { get; private set; }
         public bool Receiving = false;
+        public Func<byte[], string, byte[]> Respond = null;
+
+        object responseLock = new object();
+        private Dictionary<int, TaskCompletionSource<byte[]>> _responses;
+        private Dictionary<int, TaskCompletionSource<byte[]>> responses
+        {
+            get 
+            { 
+                lock (responseLock)
+                {
+                    return _responses;
+                } 
+            }
+            set
+            {
+                lock (responseLock)
+                {
+                    _responses = value;
+                }
+            }
+        }
 
         public Crypto Crypto { private get; set; }
 
@@ -31,6 +52,8 @@ namespace SecureTCP
 
             IPEndPoint localIpEndPoint = socket.LocalEndPoint as IPEndPoint;
             LocalIpPort = localIpEndPoint.Address.ToString().TrimStart(new char[] { ':', 'f' }) + ":" + localIpEndPoint.Port;
+
+            responses = new Dictionary<int, TaskCompletionSource<byte[]>>();
         }
 
         public byte[] ReceiveOnceAsync()
@@ -67,7 +90,7 @@ namespace SecureTCP
                 {
                     ShutDown("Bad Signature");
                 }
-                catch { ConnectionLost(); }
+                catch (Exception e) { Console.WriteLine(e.Message); ConnectionLost(); }
             }
         }
 
@@ -113,6 +136,22 @@ namespace SecureTCP
                     break;
                 case MessageType.None:
                     throw new ArgumentException("Handshake mesage not expected to end up here");
+                case MessageType.Request:
+                    if (Respond != null)
+                    {
+                        byte[] resp = Respond(data.Skip(1).ToArray(), RemoteIpPort);
+                        byte[] result = new byte[resp.Length + 1];
+                        result[0] = data[0];
+                        Array.Copy(resp, 0, result, 1, resp.Length);
+                        Send(result, MessageType.Response);
+                    }
+                    break;
+                case MessageType.Response:
+                    if (responses.ContainsKey(data[0]))
+                    {
+                        responses[data[0]].TrySetResult(data.Skip(1).ToArray());
+                    }
+                    break;
                 default:
                     throw new ArgumentException("Unknown Message Type");
             }
@@ -136,6 +175,32 @@ namespace SecureTCP
             {
                 ConnectionLost();
             }
+        }
+
+        public async Task<byte[]> SendAndWait(byte[] requestData)
+        {
+            if (responses.Count > 256) throw new Exception("Too many requests at a time. Max is 256");
+            
+            int k = 0;
+            while (responses.ContainsKey(k))
+            {
+                k++;
+            }
+
+            var tcs = new TaskCompletionSource<byte[]>();
+            responses.Add(k, tcs);
+            byte[] result = null;
+            byte[] requestMsg = new byte[requestData.Length + 1];
+            requestMsg[0] = (byte)k;
+            Array.Copy(requestData, 0, requestMsg, 1, requestData.Length);
+            Send(requestData, MessageType.Request);
+            await Task.WhenAny(tcs.Task, Task.Delay(30000));
+            if (tcs.Task.IsCompleted)
+                result = tcs.Task.Result;
+            else
+                throw new Exception("Request timed out");
+            responses.Remove(k);
+            return result;
         }
 
         public void ShutDown()
@@ -179,6 +244,10 @@ namespace SecureTCP
                     return 2;
                 case MessageType.SecurityError:
                     return 3;
+                case MessageType.Request:
+                    return 4;
+                case MessageType.Response:
+                    return 5;
                 default:
                     throw new Exception("No byte value corresponding to " + type.ToString());
             }
@@ -196,6 +265,10 @@ namespace SecureTCP
                     return MessageType.Shutdown;
                 case 3:
                     return MessageType.SecurityError;
+                case 4:
+                    return MessageType.Request;
+                case 5:
+                    return MessageType.Response;
                 default:
                     throw new Exception("No message type corresponding to " + msgByte);
             }

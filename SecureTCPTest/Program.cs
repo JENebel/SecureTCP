@@ -12,11 +12,12 @@ SecureTcpServer server;
 SecureTcpClient client;
 int serverReceived = 0;
 int clientReceived = 0;
-const int tests = 7;
+const int tests = 8;
 int testsDone = 0;
 RunTests();
 
 Console.ReadLine();
+
 async void RunTests()
 {
     //Test handshake
@@ -29,7 +30,7 @@ async void RunTests()
     AssertFalse(client.Certified);
     AssertEquals(server.Clients.Count(), 1);
     TestDone();
-
+    
     //Disconnect all
     server.DisconnectAll();
     Wait();
@@ -96,9 +97,22 @@ async void RunTests()
     await secureClient.Connect(conString);
     await client.Connect(server.Ip, server.Port);
     Wait();
+    AssertEquals(server.Clients.Count(), 2);
     AssertEquals(server.Clients[0], secureClient.LocalIpPort);
     AssertEquals(server.Clients[1], client.LocalIpPort);
     AssertTrue(server.Running);
+    TestDone();
+
+    //Requests
+    server.Respond = ((byte[] data, string ipPort) => { return Encoding.UTF8.GetBytes("Hej"); });
+    client.Respond = ((byte[] data, string ipPort) => { return Encoding.UTF8.GetBytes("Hej"); });
+    byte[] resp = await client.SendAndWait(new byte[2]);
+    string respText = Encoding.UTF8.GetString(resp);
+    AssertEquals(respText, "Hej");
+
+    resp = await server.SendAndWait(new byte[2], server.Clients[1]);
+    respText = Encoding.UTF8.GetString(resp);
+    AssertEquals(respText, "Hej");
 
     TestDone();
 
@@ -128,7 +142,7 @@ void Wait(int mult250 = 1)
 {
     for (int i = 0; i < mult250; i++)
     {
-        Thread.Sleep(75);
+        Thread.Sleep(100);
     }
 }
 
