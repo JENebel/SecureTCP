@@ -16,7 +16,7 @@ namespace SecureTCP
         private Socket socket;
         public string RemoteIpPort { get; private set; }
         public string LocalIpPort { get; private set; }
-        public bool Receiving = false;
+        public bool Connected = false;
         public Func<byte[], string, byte[]> Respond = null;
 
         object responseLock = new object();
@@ -63,8 +63,8 @@ namespace SecureTCP
 
         public async void BeginReceiving()
         {
-            if (Receiving) return;
-            Receiving = true;
+            if (Connected) return;
+            Connected = true;
 
             while (socket.Connected)
             {
@@ -90,7 +90,7 @@ namespace SecureTCP
                 {
                     ShutDown("Bad Signature");
                 }
-                catch (Exception e) { Console.WriteLine(e.Message); ConnectionLost(); }
+                catch (Exception e) { ConnectionLost(); }
             }
         }
 
@@ -216,7 +216,8 @@ namespace SecureTCP
                 socket.Shutdown(SocketShutdown.Both);
             }
             catch (Exception) { }
-            
+
+            Connected = false;
             Disconnected(this, new ClientDisconnectedEventArgs(RemoteIpPort, DisconnectReason.Expected, reason));
         }
 
@@ -229,7 +230,11 @@ namespace SecureTCP
             }
             catch { }
 
-            Disconnected(this, new ClientDisconnectedEventArgs(RemoteIpPort, DisconnectReason.Unexpected, "Connection lost"));
+            if (Connected)
+            {
+                Connected = false;
+                Disconnected(this, new ClientDisconnectedEventArgs(RemoteIpPort, DisconnectReason.Unexpected, "Connection lost"));
+            }
         }
 
         byte MsgTypeToByte(MessageType type)
