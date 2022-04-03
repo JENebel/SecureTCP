@@ -193,7 +193,7 @@ namespace SecureTCP
             byte[] requestMsg = new byte[requestData.Length + 1];
             requestMsg[0] = (byte)k;
             Array.Copy(requestData, 0, requestMsg, 1, requestData.Length);
-            Send(requestData, MessageType.Request);
+            Send(requestMsg, MessageType.Request);
             await Task.WhenAny(tcs.Task, Task.Delay(30000));
             if (tcs.Task.IsCompleted)
                 result = tcs.Task.Result;
