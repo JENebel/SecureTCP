@@ -49,7 +49,7 @@ namespace SecureTCP
             this.socket = socket;
             IPEndPoint remoteIpEndPoint = socket.RemoteEndPoint as IPEndPoint;
             RemoteIpPort = remoteIpEndPoint.Address.ToString().TrimStart(new char[] {':', 'f'}) + ":" + remoteIpEndPoint.Port;
-
+            
             IPEndPoint localIpEndPoint = socket.LocalEndPoint as IPEndPoint;
             LocalIpPort = localIpEndPoint.Address.ToString().TrimStart(new char[] { ':', 'f' }) + ":" + localIpEndPoint.Port;
 

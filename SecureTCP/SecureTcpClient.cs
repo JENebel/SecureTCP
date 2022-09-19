@@ -121,8 +121,6 @@ namespace SecureTCP
 
                 connection.Crypto = new Crypto(aes, ECDsa.Create(clientECDH.ExportParameters(true)), ECDsa.Create(serverPub.ExportParameters(false)));
 
-
-
                 Connected = true;
                 connection.DataReceived += (s, e) => { if (MessageReceived != null) MessageReceived(this, new MessageReceivedEventArgs((s as Connection).RemoteIpPort, e.Data)); };
                 connection.Disconnected += (s, e) => {
